@@ -28,13 +28,18 @@ def load_vit():
                 f.write(response.content)
             st.success("Model downloaded successfully.")
 
-    # Load model and processor
-    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k")
+    # Create config with correct num_labels (adjust to your dataset)
+    config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k", num_labels=3)
+
+    # Load model with matching config
+    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k", config=config)
+
+    # Load fine-tuned weights
     state_dict = torch.load(model_path, map_location="cpu")
     model.load_state_dict(state_dict)
     model.eval()
-    processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
 
+    processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
     return model, processor
 
 # Load model
