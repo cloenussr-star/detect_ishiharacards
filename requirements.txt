@@ -13,3 +13,4 @@ plotly
 tqdm
 requests
 scikit-learn
+torchvision
