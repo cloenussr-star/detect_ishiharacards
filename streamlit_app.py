@@ -1,46 +1,50 @@
-import streamlit as st
+import os
+import requests
 import torch
 import torch.nn.functional as F
 import numpy as np
-import cv2
 from PIL import Image
-from transformers import ViTForImageClassification, ViTImageProcessor, SwinForImageClassification, AutoImageProcessor
+import streamlit as st
+from transformers import ViTForImageClassification, ViTImageProcessor
 import matplotlib.pyplot as plt
 
-# Page setup
+# Streamlit setup
 st.set_page_config(page_title="Ishihara Card Classifier", layout="wide")
 st.title("Ishihara Card Classifier with Grad-CAM")
-st.write("Upload an Ishihara card image, select a model, and visualize predictions with Grad-CAM.")
+st.write("Upload an Ishihara card image, and the app will classify it using a Vision Transformer model fine-tuned for Ishihara tests.")
 
-# Load models
+# Model loader
 @st.cache_resource
 def load_vit():
+    model_path = "best_vit_model.pth"
+    url = "https://huggingface.co/akmal2222/ishihara-vit-model/resolve/main/best_vit_model.pth"
+
+    # Download model from Hugging Face if not present
+    if not os.path.exists(model_path):
+        with st.spinner("Downloading model from Hugging Face..."):
+            response = requests.get(url)
+            response.raise_for_status()
+            with open(model_path, "wb") as f:
+                f.write(response.content)
+            st.success("Model downloaded successfully.")
+
+    # Load model and processor
     model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k")
+    state_dict = torch.load(model_path, map_location="cpu")
+    model.load_state_dict(state_dict)
+    model.eval()
     processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
-    model.load_state_dict(torch.load("best_vit_model.pth", map_location="cpu"))
-    model.eval()
+
     return model, processor
 
-@st.cache_resource
-def load_swin():
-    model = SwinForImageClassification.from_pretrained("microsoft/swin-base-patch4-window7-224")
-    processor = AutoImageProcessor.from_pretrained("microsoft/swin-base-patch4-window7-224")
-    model.load_state_dict(torch.load("best_swin_model.pth", map_location="cpu"))
-    model.eval()
-    return model, processor
-
-# Model selection
-model_choice = st.selectbox("Select model:", ["Vision Transformer (ViT)", "Swin Transformer"])
-if model_choice == "Vision Transformer (ViT)":
-    model, processor = load_vit()
-else:
-    model, processor = load_swin()
-
+# Load model
+model, processor = load_vit()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
-# Image upload
-uploaded_file = st.file_uploader("Upload image", type=["jpg", "jpeg", "png"])
+# Upload image
+uploaded_file = st.file_uploader("Upload an Ishihara card image", type=["jpg", "jpeg", "png"])
+
 if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_container_width=True)
@@ -74,10 +78,7 @@ if uploaded_file:
         try:
             activations = model.vit.encoder.layer[-1].layernorm_before.weight.grad
         except AttributeError:
-            try:
-                activations = model.swin.encoder.layers[-1].blocks[-1].norm1.weight.grad
-            except Exception:
-                return None
+            return None
 
         if activations is None:
             return None
@@ -85,24 +86,18 @@ if uploaded_file:
         grads = activations.mean(dim=0).detach().cpu().numpy()
         cam = np.maximum(grads, 0)
         cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-        cam = cv2.resize(cam, (224, 224))
+        cam = np.resize(cam, (224, 224))
         return cam
 
     cam = generate_gradcam(model, inputs, pred_class)
     if cam is not None:
         image_resized = image.resize((224, 224))
-        original = np.array(image_resized)
-        heatmap = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
-        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-        overlay = cv2.addWeighted(original, 0.6, heatmap, 0.4, 0)
-
+        img_arr = np.array(image_resized) / 255.0
+        plt.figure(figsize=(5, 5))
+        plt.imshow(img_arr)
+        plt.imshow(cam, cmap="jet", alpha=0.5)
+        plt.axis("off")
         st.subheader("Grad-CAM Visualization")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.image(original, caption="Original", use_container_width=True)
-        with col2:
-            st.image(heatmap, caption="Heatmap", use_container_width=True)
-        with col3:
-            st.image(overlay, caption="Overlay", use_container_width=True)
+        st.pyplot(plt)
     else:
         st.warning("Grad-CAM could not be generated for this model.")
