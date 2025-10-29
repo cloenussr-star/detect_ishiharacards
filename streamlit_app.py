@@ -15,46 +15,64 @@ st.title("Ishihara Card Classifier")
 st.write("Upload an Ishihara card image, and the app will classify it using a Vision Transformer model fine-tuned for Ishihara tests.")
 
 # ------------------------------------------------------------
-# Load fine-tuned model
+# Load fine-tuned model (with flexible detection)
 # ------------------------------------------------------------
 @st.cache_resource
 def load_vit():
+    import os, requests, torch
+    from transformers import ViTForImageClassification, ViTImageProcessor, ViTConfig
+
     model_path = "best_vit_model.pth"
     url = "https://huggingface.co/akmal2222/ishihara-vit-model/resolve/main/best_vit_model.pth"
 
-    # Download model file if not present
+    # Download model file if not exists
     if not os.path.exists(model_path):
         with st.spinner("Downloading model from Hugging Face..."):
-            response = requests.get(url)
-            response.raise_for_status()
+            r = requests.get(url)
+            r.raise_for_status()
             with open(model_path, "wb") as f:
-                f.write(response.content)
+                f.write(r.content)
             st.success("Model downloaded successfully.")
 
-    # Define model architecture
-    config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k", num_labels=3)
-    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k", config=config)
+    # Try loading
+    raw = torch.load(model_path, map_location="cpu")
 
-    # Load weights
-    state = torch.load(model_path, map_location="cpu")
-    if isinstance(state, dict):
+    # Case 1: full model object
+    if isinstance(raw, torch.nn.Module):
+        st.info("Loaded full model object from checkpoint.")
+        model = raw
+        processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
+        model.eval()
+        return model, processor
+
+    # Case 2: dict of state_dict or wrapped dict
+    if isinstance(raw, dict) and "model_state_dict" in raw:
+        raw = raw["model_state_dict"]
+
+    # Try multiple possible num_labels
+    for num_labels in [2, 3, 4, 5]:
         try:
-            model.load_state_dict(state)
-        except RuntimeError:
-            if "model_state_dict" in state:
-                model.load_state_dict(state["model_state_dict"])
-            else:
-                st.error("Model architecture does not match checkpoint.")
-                raise
-    else:
-        st.error("Unsupported checkpoint format.")
-        raise ValueError("Invalid model checkpoint.")
+            config = ViTConfig.from_pretrained(
+                "google/vit-base-patch16-224-in21k", num_labels=num_labels
+            )
+            model = ViTForImageClassification.from_pretrained(
+                "google/vit-base-patch16-224-in21k", config=config
+            )
+            model.load_state_dict(raw, strict=False)
+            st.success(f"Loaded model successfully with num_labels={num_labels}.")
+            processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
+            model.eval()
+            return model, processor
+        except Exception:
+            continue
 
-    processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
-    model.eval()
-    return model, processor
+    st.error("Failed to load model: architecture mismatch.")
+    raise RuntimeError("Checkpoint incompatible with architecture.")
 
 
+# ------------------------------------------------------------
+# Initialize model
+# ------------------------------------------------------------
 model, processor = load_vit()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
