@@ -13,28 +13,47 @@ st.set_page_config(page_title="Ishihara Card Classifier", layout="wide")
 st.title("Ishihara Card Classifier with Grad-CAM")
 st.write("Upload an Ishihara card image, and the app will classify it using a Vision Transformer model fine-tuned for Ishihara tests.")
 
-# Model loader
+# Load model
 @st.cache_resource
 def load_vit():
     model_path = "best_vit_model.pth"
     url = "https://huggingface.co/akmal2222/ishihara-vit-model/resolve/main/best_vit_model.pth"
 
+    # Download model if not already available
     if not os.path.exists(model_path):
         with st.spinner("Downloading model from Hugging Face..."):
-            r = requests.get(url)
-            r.raise_for_status()
+            response = requests.get(url)
+            response.raise_for_status()
             with open(model_path, "wb") as f:
-                f.write(r.content)
+                f.write(response.content)
             st.success("Model downloaded successfully.")
 
-    # Load pretrained ViT as placeholder (no fine-tuned weights)
-    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k")
-    processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
+    # Create model config (adjust num_labels based on your dataset)
+    config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k", num_labels=3)
+    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k", config=config)
+
+    # Load checkpoint
+    obj = torch.load(model_path, map_location="cpu")
+    if isinstance(obj, dict):
+        try:
+            model.load_state_dict(obj)
+            st.info("Model weights loaded successfully.")
+        except RuntimeError:
+            if "model_state_dict" in obj:
+                model.load_state_dict(obj["model_state_dict"])
+                st.info("Loaded model_state_dict successfully.")
+            else:
+                st.error("Model architecture does not match checkpoint.")
+                raise
+    else:
+        st.error("Unsupported checkpoint format.")
+        raise ValueError("Unknown checkpoint type.")
+
     model.eval()
+    processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
     return model, processor
 
 
-# Load model
 model, processor = load_vit()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
@@ -47,50 +66,50 @@ if uploaded_file:
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
     # Inference
-    # Inference
-inputs = processor(images=image, return_tensors="pt").to(device)
-with torch.no_grad():
-    outputs = model(**inputs)
-    probs = torch.softmax(outputs.logits, dim=1)
-    pred_class = torch.argmax(probs).item()
-    confidence = probs[0, pred_class].item()
-
-# Handle any number of classes safely
-k = min(probs.shape[1], 3)
-topk_prob, topk_idx = torch.topk(probs, k, dim=1)
-
-st.subheader("Predictions")
-st.write(f"Predicted class: {pred_class}")
-st.write(f"Confidence: {confidence:.2%}")
-
-topk_table = {
-    "Class": topk_idx[0].cpu().numpy(),
-    "Confidence": [f"{p:.2%}" for p in topk_prob[0].cpu().numpy()]
-}
-st.table(topk_table)
-
-
-    # Grad-CAM
-    def generate_gradcam(model, inputs, target_class):
-        model.zero_grad()
+    inputs = processor(images=image, return_tensors="pt").to(device)
+    with torch.no_grad():
         outputs = model(**inputs)
-        logits = outputs.logits
-        logits[:, target_class].backward()
+        probs = torch.softmax(outputs.logits, dim=1)
+        pred_class = torch.argmax(probs).item()
+        confidence = probs[0, pred_class].item()
 
-        try:
-            activations = model.vit.encoder.layer[-1].layernorm_before.weight.grad
-        except AttributeError:
-            return None
+    # Handle any number of classes safely
+    k = min(probs.shape[1], 3)
+    topk_prob, topk_idx = torch.topk(probs, k, dim=1)
 
-        if activations is None:
-            return None
+    st.subheader("Predictions")
+    st.write(f"Predicted class index: {pred_class}")
+    st.write(f"Confidence: {confidence:.2%}")
 
-        grads = activations.mean(dim=0).detach().cpu().numpy()
-        cam = np.maximum(grads, 0)
-        cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-        cam = np.resize(cam, (224, 224))
-        return cam
+    topk_table = {
+        "Class Index": topk_idx[0].cpu().numpy(),
+        "Confidence": [f"{p:.2%}" for p in topk_prob[0].cpu().numpy()]
+    }
+    st.table(topk_table)
 
+# Grad-CAM
+def generate_gradcam(model, inputs, target_class):
+    model.zero_grad()
+    outputs = model(**inputs)
+    logits = outputs.logits
+    logits[:, target_class].backward()
+
+    try:
+        activations = model.vit.encoder.layer[-1].layernorm_before.weight.grad
+    except AttributeError:
+        return None
+
+    if activations is None:
+        return None
+
+    grads = activations.mean(dim=0).detach().cpu().numpy()
+    cam = np.maximum(grads, 0)
+    cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+    cam = np.resize(cam, (224, 224))
+    return cam
+
+
+if uploaded_file:
     cam = generate_gradcam(model, inputs, pred_class)
     if cam is not None:
         image_resized = image.resize((224, 224))
@@ -103,3 +122,4 @@ st.table(topk_table)
         st.pyplot(plt)
     else:
         st.warning("Grad-CAM could not be generated for this model.")
+
