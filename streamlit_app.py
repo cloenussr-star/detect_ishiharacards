@@ -19,7 +19,7 @@ def load_vit():
     model_path = "best_vit_model.pth"
     url = "https://huggingface.co/akmal2222/ishihara-vit-model/resolve/main/best_vit_model.pth"
 
-    # Download model from Hugging Face if not present
+    # Download model if not already available
     if not os.path.exists(model_path):
         with st.spinner("Downloading model from Hugging Face..."):
             response = requests.get(url)
@@ -28,17 +28,35 @@ def load_vit():
                 f.write(response.content)
             st.success("Model downloaded successfully.")
 
-    # Adjust this number to your dataset's number of classes (example: 3)
+    # Load model base config (set num_labels sesuai dataset kamu)
     config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k", num_labels=3)
-
-    # Load model with the right config
     model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k", config=config)
 
-    # Load fine-tuned weights
-    state_dict = torch.load(model_path, map_location="cpu")
-    model.load_state_dict(state_dict)
-    model.eval()
+    # Try to load weights safely
+    obj = torch.load(model_path, map_location="cpu")
 
+    # Case 1: full model saved
+    if isinstance(obj, ViTForImageClassification):
+        model = obj
+        st.info("Loaded full model object from file.")
+    # Case 2: state_dict only
+    elif isinstance(obj, dict):
+        try:
+            model.load_state_dict(obj)
+            st.info("Loaded model state_dict successfully.")
+        except RuntimeError:
+            # Some checkpoints wrap state_dict under "model_state_dict"
+            if "model_state_dict" in obj:
+                model.load_state_dict(obj["model_state_dict"])
+                st.info("Loaded model_state_dict successfully.")
+            else:
+                st.error("Model architecture does not match checkpoint.")
+                raise
+    else:
+        st.error("Unsupported checkpoint format.")
+        raise ValueError("Unknown checkpoint type.")
+
+    model.eval()
     processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
     return model, processor
 
