@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from PIL import Image
 import streamlit as st
-from transformers import ViTForImageClassification, ViTImageProcessor
+from transformers import ViTForImageClassification, ViTImageProcessor, ViTConfig
 import matplotlib.pyplot as plt
 
 # Streamlit setup
@@ -28,10 +28,10 @@ def load_vit():
                 f.write(response.content)
             st.success("Model downloaded successfully.")
 
-    # Create config with correct num_labels (adjust to your dataset)
+    # Adjust this number to your dataset's number of classes (example: 3)
     config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k", num_labels=3)
 
-    # Load model with matching config
+    # Load model with the right config
     model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k", config=config)
 
     # Load fine-tuned weights
