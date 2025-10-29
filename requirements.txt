@@ -12,3 +12,4 @@ seaborn
 plotly
 tqdm
 requests
+scikit-learn
