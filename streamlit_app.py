@@ -47,23 +47,28 @@ if uploaded_file:
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
     # Inference
-    inputs = processor(images=image, return_tensors="pt").to(device)
-    with torch.no_grad():
-        outputs = model(**inputs)
-        probs = torch.softmax(outputs.logits, dim=1)
-        pred_class = torch.argmax(probs).item()
-        confidence = probs[0, pred_class].item()
-        top3_prob, top3_idx = torch.topk(probs, 3, dim=1)
+    # Inference
+inputs = processor(images=image, return_tensors="pt").to(device)
+with torch.no_grad():
+    outputs = model(**inputs)
+    probs = torch.softmax(outputs.logits, dim=1)
+    pred_class = torch.argmax(probs).item()
+    confidence = probs[0, pred_class].item()
 
-    st.subheader("Predictions")
-    st.write(f"Predicted class: {pred_class}")
-    st.write(f"Confidence: {confidence:.2%}")
+# Handle any number of classes safely
+k = min(probs.shape[1], 3)
+topk_prob, topk_idx = torch.topk(probs, k, dim=1)
 
-    top3_table = {
-        "Class": top3_idx[0].cpu().numpy(),
-        "Confidence": [f"{p:.2%}" for p in top3_prob[0].cpu().numpy()]
-    }
-    st.table(top3_table)
+st.subheader("Predictions")
+st.write(f"Predicted class: {pred_class}")
+st.write(f"Confidence: {confidence:.2%}")
+
+topk_table = {
+    "Class": topk_idx[0].cpu().numpy(),
+    "Confidence": [f"{p:.2%}" for p in topk_prob[0].cpu().numpy()]
+}
+st.table(topk_table)
+
 
     # Grad-CAM
     def generate_gradcam(model, inputs, target_class):
