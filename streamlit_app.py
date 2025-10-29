@@ -16,42 +16,11 @@ st.write("Upload an Ishihara card image, and the app will classify it using a Vi
 # Load model
 @st.cache_resource
 def load_vit():
-    model_path = "best_vit_model.pth"
-    url = "https://huggingface.co/akmal2222/ishihara-vit-model/resolve/main/best_vit_model.pth"
-
-    # Download model if not already available
-    if not os.path.exists(model_path):
-        with st.spinner("Downloading model from Hugging Face..."):
-            response = requests.get(url)
-            response.raise_for_status()
-            with open(model_path, "wb") as f:
-                f.write(response.content)
-            st.success("Model downloaded successfully.")
-
-    # Create model config (adjust num_labels based on your dataset)
-    config = ViTConfig.from_pretrained("google/vit-base-patch16-224-in21k", num_labels=3)
-    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k", config=config)
-
-    # Load checkpoint
-    obj = torch.load(model_path, map_location="cpu")
-    if isinstance(obj, dict):
-        try:
-            model.load_state_dict(obj)
-            st.info("Model weights loaded successfully.")
-        except RuntimeError:
-            if "model_state_dict" in obj:
-                model.load_state_dict(obj["model_state_dict"])
-                st.info("Loaded model_state_dict successfully.")
-            else:
-                st.error("Model architecture does not match checkpoint.")
-                raise
-    else:
-        st.error("Unsupported checkpoint format.")
-        raise ValueError("Unknown checkpoint type.")
-
-    model.eval()
+    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k")
     processor = ViTImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
+    model.eval()
     return model, processor
+
 
 
 model, processor = load_vit()
