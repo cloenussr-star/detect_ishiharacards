@@ -5,7 +5,7 @@ torch
 transformers
 accelerate
 Pillow
-opencv-python
+opencv-python-headless
 captum
 matplotlib
 seaborn
